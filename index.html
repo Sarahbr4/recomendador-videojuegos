@@ -77,28 +77,36 @@ const questions=[
 let qi=0, ans={};
 function save(){localStorage.setItem('myGames',JSON.stringify(games))}
 function escape(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-const COVER_CACHE_KEY='gameCoverCacheV1';
+const COVER_CACHE_KEY='gameCoverCacheV2';
 let coverCache={};
 try{coverCache=JSON.parse(localStorage.getItem(COVER_CACHE_KEY)||'{}')||{}}catch(e){coverCache={}}
 function saveCoverCache(){try{localStorage.setItem(COVER_CACHE_KEY,JSON.stringify(coverCache))}catch(e){}}
 function coverKey(title){return title.toLowerCase().trim()}
 async function findCover(title){
  const key=coverKey(title);
- if(Object.prototype.hasOwnProperty.call(coverCache,key)) return coverCache[key];
- const clean=title.replace(/\b(1|2|3)\b/g,'').replace(/season [12]/ig,'').trim();
- const urls=[
-  'https://es.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch='+encodeURIComponent(clean+' videojuego')+'&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=500&format=json&origin=*',
-  'https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch='+encodeURIComponent(clean+' video game')+'&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=500&format=json&origin=*'
- ];
- for(const url of urls){
+ if(Object.prototype.hasOwnProperty.call(coverCache,key) && coverCache[key]) return coverCache[key];
+ const variants=[
+  title,
+  title.replace(/\b(1|2|3)\b/g,'').replace(/season [12]/ig,'').replace(/remastered/ig,'').trim(),
+  title.replace(/\s*[:\-–—].*$/,'').trim()
+ ].filter(Boolean);
+ const endpoints=[];
+ for(const lang of ['en','es']){
+  for(const q of variants){
+   endpoints.push('https://'+lang+'.wikipedia.org/w/api.php?action=query&titles='+encodeURIComponent(q)+'&prop=pageimages&piprop=thumbnail&pithumbsize=600&format=json&origin=*');
+   endpoints.push('https://'+lang+'.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch='+encodeURIComponent(q+' video game')+'&gsrlimit=3&prop=pageimages&piprop=thumbnail&pithumbsize=600&format=json&origin=*');
+  }
+ }
+ for(const url of endpoints){
   try{
-   const r=await fetch(url); if(!r.ok) continue;
+   const r=await fetch(url,{cache:'force-cache'}); if(!r.ok) continue;
    const d=await r.json(); const pages=d.query&&d.query.pages?Object.values(d.query.pages):[];
-   const img=pages[0]&&pages[0].thumbnail&&pages[0].thumbnail.source;
-   if(img){coverCache[key]=img;saveCoverCache();return img}
+   const good=pages.find(pg=>pg.thumbnail&&pg.thumbnail.source);
+   if(good){const img=good.thumbnail.source; coverCache[key]=img;saveCoverCache();return img;}
   }catch(e){}
  }
- coverCache[key]='';saveCoverCache();return '';
+ // Don't permanently cache failures: a later attempt may succeed.
+ delete coverCache[key]; saveCoverCache(); return '';
 }
 function attachCovers(root=document){
  const imgs=[...root.querySelectorAll('img[data-cover]')];
