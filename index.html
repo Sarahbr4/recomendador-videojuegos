@@ -16,12 +16,12 @@ nav{display:flex;gap:7px;overflow:auto;padding-bottom:3px;margin-bottom:16px}.ta
 .panel{background:rgba(18,22,28,.9);border:1px solid var(--border);border-radius:18px;padding:18px}.hidden{display:none!important}
 h1{font-size:28px;margin:0 0 6px}h2{font-size:20px;margin:0 0 5px}.muted{color:var(--muted)}.hero{padding:22px;border-radius:18px;background:linear-gradient(135deg,#211b38,#151922);border:1px solid #332a4d}
 button,input,select{font:inherit}button{cursor:pointer}.primary{background:var(--accent);color:white;border:0;border-radius:12px;padding:12px 15px;font-weight:700}.secondary{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:11px 14px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.game{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px}.game b{display:block;margin-bottom:7px}.tag{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:4px 7px;font-size:11px;color:var(--muted);margin:2px 3px 0 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.game{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:0;overflow:hidden}.game b{display:block;margin-bottom:7px}.cover-wrap{position:relative;width:100%;aspect-ratio:2/3;background:linear-gradient(135deg,#242a35,#12161c)}.cover{width:100%;height:100%;display:block;object-fit:cover;background:linear-gradient(135deg,#242a35,#12161c)}.cover-wrap .cover-placeholder{position:absolute;inset:0}.cover-placeholder-wrap .cover{opacity:0}.cover-placeholder-wrap .cover-placeholder{opacity:1}.cover-wrap:not(.cover-placeholder-wrap) .cover{opacity:1}.cover-wrap:not(.cover-placeholder-wrap) .cover-placeholder{display:none}.game-info{padding:13px}.cover-placeholder{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:32px;aspect-ratio:2/3;background:linear-gradient(135deg,#242a35,#12161c)}.result{overflow:hidden}.result .cover{margin:-16px -16px 12px;width:calc(100% + 32px);max-width:none}.tag{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:4px 7px;font-size:11px;color:var(--muted);margin:2px 3px 0 0}
 input,select{width:100%;background:var(--card);border:1px solid var(--border);border-radius:12px;color:var(--text);padding:12px;outline:none}input:focus,select:focus{border-color:var(--accent)}
 .row{display:grid;grid-template-columns:1fr auto;gap:8px}.answers{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin-top:16px}.answer{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:left}.answer:hover{border-color:var(--accent2);transform:translateY(-1px)}
 .result{border:1px solid var(--border);background:var(--card);border-radius:16px;padding:16px}.rank{font-size:12px;color:var(--accent2);font-weight:800}.why{color:var(--muted);font-size:13px;margin-top:7px;line-height:1.45}
 .toolbar{display:grid;grid-template-columns:1fr 170px;gap:8px;margin:14px 0}.small{font-size:12px;color:var(--muted)}
-@media(max-width:600px){main{padding:14px 12px 32px}.toolbar{grid-template-columns:1fr}.hero{padding:18px}.grid{grid-template-columns:1fr 1fr}.game{padding:11px}.row{grid-template-columns:1fr}}
+@media(max-width:600px){main{padding:14px 12px 32px}.toolbar{grid-template-columns:1fr}.hero{padding:18px}.grid{grid-template-columns:1fr 1fr}.game-info{padding:10px}.row{grid-template-columns:1fr}.result .cover{margin:-16px -16px 12px;width:calc(100% + 32px)}}
 </style>
 </head>
 <body>
@@ -77,6 +77,43 @@ const questions=[
 let qi=0, ans={};
 function save(){localStorage.setItem('myGames',JSON.stringify(games))}
 function escape(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+const COVER_CACHE_KEY='gameCoverCacheV1';
+let coverCache={};
+try{coverCache=JSON.parse(localStorage.getItem(COVER_CACHE_KEY)||'{}')||{}}catch(e){coverCache={}}
+function saveCoverCache(){try{localStorage.setItem(COVER_CACHE_KEY,JSON.stringify(coverCache))}catch(e){}}
+function coverKey(title){return title.toLowerCase().trim()}
+async function findCover(title){
+ const key=coverKey(title);
+ if(Object.prototype.hasOwnProperty.call(coverCache,key)) return coverCache[key];
+ const clean=title.replace(/\b(1|2|3)\b/g,'').replace(/season [12]/ig,'').trim();
+ const urls=[
+  'https://es.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch='+encodeURIComponent(clean+' videojuego')+'&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=500&format=json&origin=*',
+  'https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch='+encodeURIComponent(clean+' video game')+'&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=500&format=json&origin=*'
+ ];
+ for(const url of urls){
+  try{
+   const r=await fetch(url); if(!r.ok) continue;
+   const d=await r.json(); const pages=d.query&&d.query.pages?Object.values(d.query.pages):[];
+   const img=pages[0]&&pages[0].thumbnail&&pages[0].thumbnail.source;
+   if(img){coverCache[key]=img;saveCoverCache();return img}
+  }catch(e){}
+ }
+ coverCache[key]='';saveCoverCache();return '';
+}
+function attachCovers(root=document){
+ const imgs=[...root.querySelectorAll('img[data-cover]')];
+ if(!imgs.length)return;
+ const load=async img=>{
+  const title=img.dataset.cover;
+  const url=await findCover(title);
+  if(url){img.src=url;img.style.display='block';img.closest('.cover-wrap')?.classList.remove('cover-placeholder-wrap')}
+  else {img.style.display='none';const ph=img.parentElement; if(ph) ph.innerHTML='<div class=\"cover-placeholder\">🎮</div>';}
+ };
+ if('IntersectionObserver' in window){
+  const io=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){io.unobserve(e.target);load(e.target)}})},{rootMargin:'250px'});
+  imgs.forEach(i=>io.observe(i));
+ }else imgs.forEach(load);
+}
 function init(){
  $('#total').textContent=games.length+' juegos';
  const ps=[...new Set(games.map(g=>g.platform))].sort();
@@ -135,12 +172,12 @@ function recommend(){
  let ranked=games.map(g=>({...g,...score(g)})).sort((a,b)=>b.s-a.s || a.title.localeCompare(b.title));
  let top=ranked.slice(0,3);
  $('#results').classList.remove('hidden');
- $('#results').innerHTML='<div class="panel"><div class="small">RESULTADO</div><h2>🎯 Estas son mis 3 opciones para ti</h2><div class="grid" style="margin-top:13px">'+top.map((g,i)=>`<div class="result"><div class="rank">#${i+1} · ${escape(g.platform)}</div><h3 style="margin:5px 0">${escape(g.title)}</h3><div class="why">${g.why.length?'Encaja por: '+escape(g.why.join(' · ')):'Es una opción de tu biblioteca que puede encajar con la combinación de respuestas.'}</div></div>`).join('')+'</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button class="primary" onclick="document.getElementById(\'start\').click()">Otra recomendación</button><button class="secondary" onclick="showPage(\'library\')">Ver biblioteca</button></div></div>';
+ $('#results').innerHTML='<div class="panel"><div class="small">RESULTADO</div><h2>🎯 Estas son mis 3 opciones para ti</h2><div class="grid" style="margin-top:13px">'+top.map((g,i)=>`<div class="result"><div class="cover-wrap cover-placeholder-wrap"><img class="cover" data-cover="${escape(g.title)}" alt="Carátula de ${escape(g.title)}" loading="lazy" style="display:block"><div class="cover-placeholder">🎮</div></div><div class="rank">#${i+1} · ${escape(g.platform)}</div><h3 style="margin:5px 0">${escape(g.title)}</h3><div class="why">${g.why.length?'Encaja por: '+escape(g.why.join(' · ')):'Es una opción de tu biblioteca que puede encajar con la combinación de respuestas.'}</div></div>`).join('')+'</div><div class="small" style="margin-top:12px">Las carátulas se buscan automáticamente y pueden tardar unos segundos la primera vez.</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button class="primary" onclick="document.getElementById(\'start\').click()">Otra recomendación</button><button class="secondary" onclick="showPage(\'library\')">Ver biblioteca</button></div></div>';attachCovers($('#results'));
 }
 function renderLibrary(){
  let q=$('#search').value.toLowerCase(),p=$('#platform').value;
  let list=games.filter(g=>(!q||g.title.toLowerCase().includes(q))&&(!p||g.platform===p));
- $('#libraryGrid').innerHTML=list.map(g=>`<div class="game"><b>${escape(g.title)}</b><span class="tag">${escape(g.platform)}</span></div>`).join('') || '<div class="muted">No hay juegos que coincidan.</div>';
+ $('#libraryGrid').innerHTML=list.map(g=>`<div class="game"><div class="cover-wrap cover-placeholder-wrap"><img class="cover" data-cover="${escape(g.title)}" alt="Carátula de ${escape(g.title)}" loading="lazy" style="display:block"><div class="cover-placeholder">🎮</div></div><div class="game-info"><b>${escape(g.title)}</b><span class="tag">${escape(g.platform)}</span></div></div>`).join('') || '<div class="muted">No hay juegos que coincidan.</div>'; attachCovers($('#libraryGrid'));
 }
 $('#search').oninput=renderLibrary;$('#platform').onchange=renderLibrary;
 $('#saveGames').onclick=()=>{
